@@ -111,9 +111,9 @@ abstract class AmazonCore
     protected $mockFiles;
     protected $mockIndex = 0;
     protected $env;
-    protected $marketplaceId;
     protected $rawResponses = array();
     protected $proxyInfo = [];
+    protected $isDeveloperSign = false;
 
     /**
      * AmazonCore constructor sets up key information used in all Amazon requests.
@@ -130,7 +130,7 @@ abstract class AmazonCore
      * @param array|string $m [optional] <p>The files (or file) to use in Mock Mode.
      * When Mock Mode is enabled, the object will retrieve one of these files
      * from the list to use as a response. See <i>setMock</i> for more information.</p>
-     * @param string $config [optional] <p>An alternate config file to set. Used for testing.</p>
+     * @throws Exception
      */
     protected function __construct($s, $mock = false, $m = null)
     {
@@ -162,6 +162,7 @@ abstract class AmazonCore
      * to be used with Mock Mode. If a single string is given, this method will
      * put it into an array. Integers can also be given, for use in <i>fetchMockResponse</i>.
      * These numbers should only be response codes, such as <b>200</b> or <b>404</b>.</p>
+     * @throws Exception
      */
     public function setMock($b = true, $files = null)
     {
@@ -207,6 +208,7 @@ abstract class AmazonCore
      * contents of the file, or a string of said contents if <i>$load</i> is set to
      * <b>FALSE</b>. The return will be <b>FALSE</b> if the file cannot be
      * fetched for any reason.</p>
+     * @throws Exception
      */
     protected function fetchMockFile($load = true)
     {
@@ -256,6 +258,7 @@ abstract class AmazonCore
      *
      * This method is used for returning to the beginning of the mock file list.
      * @param boolean $mute [optional]<p>Set to <b>TRUE</b> to prevent logging.</p>
+     * @throws Exception
      */
     protected function resetMock($mute = false)
     {
@@ -283,6 +286,7 @@ abstract class AmazonCore
      * @return boolean|array An array containing the HTTP response, or simply
      * the value <b>FALSE</b> if the response could not be found or does not
      * match the list of valid responses.
+     * @throws Exception
      */
     protected function fetchMockResponse()
     {
@@ -353,6 +357,7 @@ abstract class AmazonCore
      * @param array $r <p>The HTTP response array. Expects the array to have
      * the fields <i>code</i>, <i>body</i>, and <i>error</i>.</p>
      * @return boolean <b>TRUE</b> if the status is 200 OK, <b>FALSE</b> otherwise.
+     * @throws Exception
      */
     protected function checkResponse($r)
     {
@@ -410,37 +415,56 @@ abstract class AmazonCore
         // }
 
         $store = Config::get('amazon-mws.store');
+        $developer = null;
 
         if (array_key_exists($s, $store)) {
             $this->storeName = $s;
+
+            if (array_key_exists('MWSAuthToken', $store[$s]) && !empty($store[$s]['MWSAuthToken'])) {
+                $this->isDeveloperSign = true;
+                $developer = Config::get('amazon-mws.developer');
+
+                $area = isset($store[$s]['area']) && !empty($store[$s]['area']) ? $store[$s]['area'] : 'USA';
+                $developer = $developer[$area];
+                $this->options['MWSAuthToken'] = $store[$s]['MWSAuthToken'];
+                if (empty($this->options['MWSAuthToken'])) {
+                    $this->log("MWSAuthToken is missing!", 'Warning');
+                }
+
+                if (!isset($developer['secret'])  || empty($developer['secret'])) {
+                    $this->log("Developer Secret is missing!", 'Warning');
+                }
+                if (isset($developer['id']) && !empty($developer['id'])) {
+                    $this->options['AWSAccessKeyId'] = $developer['id'];
+                } else {
+                    $this->log("Access Key ID is missing!", 'Warning');
+                }
+
+            } else {
+
+                if (array_key_exists('keyId', $store[$s])) {
+                    $this->options['AWSAccessKeyId'] = $store[$s]['keyId'];
+                }
+                if(empty($this->options['AWSAccessKeyId'])){
+                    $this->log("Access Key ID is missing!", 'Warning');
+                }
+                if (!array_key_exists('secretKey', $store[$s])) {
+                    $this->log("Secret Key is missing!", 'Warning');
+                }
+
+            }
+
+
             if (array_key_exists('merchantId', $store[$s])) {
                 $this->options['SellerId'] = $store[$s]['merchantId'];
             } else {
                 $this->log("Merchant ID is missing!", 'Warning');
             }
-            if (array_key_exists('keyId', $store[$s])) {
-                $this->options['AWSAccessKeyId'] = $store[$s]['keyId'];
-            } else {
-                $this->log("Access Key ID is missing!", 'Warning');
-            }
-            if (!array_key_exists('secretKey', $store[$s])) {
-                $this->log("Secret Key is missing!", 'Warning');
-            }
+
             // Overwrite Amazon service url if specified
             if (array_key_exists('amazonServiceUrl', $store[$s])) {
                 $AMAZON_SERVICE_URL = $store[$s]['amazonServiceUrl'];
                 $this->urlbase = $AMAZON_SERVICE_URL;
-            }
-            if (array_key_exists('proxyInfo', $store[$s])) {
-                $this->proxyInfo = $store[$s]['proxyInfo'];
-            }
-
-            if (array_key_exists('authToken', $store[$s]) && !empty($store[$s]['authToken'])) {
-                $this->options['MWSAuthToken'] = $store[$s]['authToken'];
-            }
-
-            if (array_key_exists('marketplaceId', $store[$s]) && !empty($store[$s]['marketplaceId'])) {
-                $this->marketplaceId = $store[$s]['marketplaceId'];
             }
 
         } else {
@@ -553,10 +577,11 @@ abstract class AmazonCore
      * The string given is passed through <i>strtotime</i> before being used. The
      * value returned is actually 30 seconds early, to prevent it from tripping up
      * Amazon. If no time is given, the current time is used.
-     * @param string $time [optional] <p>The time to use. Since this value is
+     * @param bool $time [optional] <p>The time to use. Since this value is
      * passed through <i>strtotime</i> first, values such as "-1 hour" are fine.
      * Defaults to the current time.</p>
      * @return string Unix timestamp of the time, minus 30 seconds.
+     * @throws Exception
      */
     protected function genTime($time = false)
     {
@@ -592,10 +617,22 @@ abstract class AmazonCore
 
         $store = Config::get('amazon-mws.store');
 
-        if (array_key_exists($this->storeName, $store) && array_key_exists('secretKey', $store[$this->storeName])) {
-            $secretKey = $store[$this->storeName]['secretKey'];
-        } else {
-            throw new Exception("Secret Key is missing!");
+        if($this->isDeveloperSign){
+            $developer = Config::get('amazon-mws.developer');
+            $area = isset($store[$this->storeName]['area']) && !empty($store[$this->storeName]['area']) ? $store[$this->storeName]['area'] : 'USA';
+            $developer = $developer[$area];
+            if (isset($developer['secret']) && !empty($developer['secret'])) {
+                $secretKey = $developer['secret'];
+            } else {
+                throw new Exception("Developer Secret is missing!");
+            }
+        }else {
+
+            if (array_key_exists($this->storeName, $store) && array_key_exists('secretKey', $store[$this->storeName])) {
+                $secretKey = $store[$this->storeName]['secretKey'];
+            } else {
+                throw new Exception("Secret Key is missing!");
+            }
         }
 
         unset($this->options['Signature']);
@@ -611,6 +648,7 @@ abstract class AmazonCore
      * @param string $url <p>URL to feed to cURL</p>
      * @param array $param <p>parameter array to feed to cURL</p>
      * @return array cURL response array
+     * @throws Exception
      */
     protected function sendRequest($url, $param)
     {

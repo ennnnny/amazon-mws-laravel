@@ -46,7 +46,6 @@ class AmazonShipmentList extends AmazonInboundCore implements \Iterator
      * @param boolean $mock [optional] <p>This is a flag for enabling Mock Mode.
      * This defaults to <b>FALSE</b>.</p>
      * @param array|string $m [optional] <p>The files (or file) to use in Mock Mode.</p>
-     * @param string $config [optional] <p>An alternate config file to set. Used for testing.</p>
      */
     public function __construct($s, $mock = false, $m = null)
     {
@@ -239,6 +238,7 @@ class AmazonShipmentList extends AmazonInboundCore implements \Iterator
      * This operation can potentially involve tokens.
      * @param boolean <p>When set to <b>FALSE</b>, the function will not recurse, defaults to <b>TRUE</b></p>
      * @return boolean <b>FALSE</b> if something goes wrong
+     * @throws Exception
      */
     public function fetchShipments($r = true)
     {
@@ -526,6 +526,44 @@ class AmazonShipmentList extends AmazonInboundCore implements \Iterator
         }
     }
 
+
+    /**
+     * For carton label pdf
+     * @param bool $r
+     * @param array $data
+     * @return array|bool
+     * @throws Exception
+     */
+    public function getPackageLabels($r = true, $data = array())
+    {
+        $this->options['Action'] = 'GetPackageLabels';
+        $this->options['ShipmentId'] = $data['ShipmentId'];
+        $this->options['PageType'] = $data['PageType'];
+        $this->options['NumberOfPackages'] = $data['NumberOfPackages'];
+        $url = $this->urlbase . $this->urlbranch;
+        $query = $this->genQuery();
+        $path = $this->options['Action'] . 'Result';
+        if ($this->mockMode) {
+            $xml = $this->fetchMockFile()->$path;
+        } else {
+            $response = $this->sendRequest($url, array('Post' => $query));
+            if (!$this->checkResponse($response)) {
+                return false;
+            }
+
+            $xml = simplexml_load_string($response['body'])->$path;
+        }
+
+        if (!$xml) {
+            return false;
+        }
+        $pdf = [
+            'PdfDocument'=> (string)$xml->TransportDocument->PdfDocument,
+            'Checksum' => (string)$xml->TransportDocument->Checksum,
+        ];
+        return $pdf;
+
+    }
     /**
      * Returns whether or not cases are required for the specified shipment.
      *
@@ -593,7 +631,7 @@ class AmazonShipmentList extends AmazonInboundCore implements \Iterator
 
     /**
      * Iterator function
-     * @return type
+     * @return int
      */
     public function key()
     {
@@ -610,12 +648,10 @@ class AmazonShipmentList extends AmazonInboundCore implements \Iterator
 
     /**
      * Iterator function
-     * @return type
+     * @return bool
      */
     public function valid()
     {
         return isset($this->shipmentList[$this->i]);
     }
 }
-
-?>
