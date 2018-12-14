@@ -9,12 +9,6 @@
             "email": "kuye1130@gmail.com"
         }
     ],
-    "repositories": [
-        {
-            "type": "vcs",
-            "url": "https://github.com/ennnnny/amazon-mws-laravel"
-        }
-    ],
     "require": {
         "php": ">=5.5.9",
         "ext-curl": "*",
@@ -25,7 +19,7 @@
     },
     "autoload": {
         "psr-4": {
-            "Sonnenglas\\AmazonMws\\": "src"
+            "Ennnnny\\AmazonMws\\": "src"
         }
     },
     "minimum-stability": "stable"
