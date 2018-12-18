@@ -935,5 +935,3 @@ abstract class AmazonCore
     // -- End Functions from Amazon --
 
 }
-
-?>
